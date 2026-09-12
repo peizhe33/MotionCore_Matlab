@@ -1,0 +1,36 @@
+{
+  "validation_status": "Independent Python ODE and exact-state reference verified; MATLAB/Simulink NOT executed",
+  "parameters_source": "motioncore_init.m numeric assignments",
+  "poles_per_s": [
+    -987.3267145504651,
+    -13.67328544953493
+  ],
+  "equilibrium": {
+    "rpm": 2122.065907891938,
+    "current_A": 0.4444444444444443,
+    "torque_Nm": 0.022222222222222216,
+    "back_emf_V": 11.111111111111112
+  },
+  "peak_current_A": 5.7428785962509465,
+  "peak_current_absolute_time_s": 0.054450000000000005,
+  "final_at_stop": {
+    "rpm": 2121.990200019198,
+    "current_A": 0.4446453948439678
+  },
+  "ODE_vs_exact_max_absolute_errors": {
+    "current_A": 5.81579229219642e-11,
+    "omega_rad_s": 2.9479529928266857e-11
+  },
+  "energy_relative_residual": 1.6777991718917397e-06,
+  "constant_load_crosscheck": {
+    "load_Nm": 0.05,
+    "rpm": 1768.388256576615,
+    "current_A": 1.3703703703703702
+  },
+  "not_tested": [
+    "MATLAB syntax/runtime",
+    "Simulink model compilation",
+    "SLX rendering/layout",
+    "Simulink logged output"
+  ]
+}

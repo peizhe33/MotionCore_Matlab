@@ -1,0 +1,15 @@
+# Simulink generated/cache files
+**/slprj/
+*.slxc
+
+# MATLAB temporary/autosave files
+*.asv
+*.autosave
+*.m~
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Local automatic/checkpoint backups
+motioncore/phase3_backups/
