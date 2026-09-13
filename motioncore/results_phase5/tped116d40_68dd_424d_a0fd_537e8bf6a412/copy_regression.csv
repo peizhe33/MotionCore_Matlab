@@ -1,0 +1,5 @@
+pass,max_abs_rpm,rms_rpm,max_abs_current_A,rms_current_A,max_abs_torque_Nm,rms_torque_Nm,max_abs_back_emf_V,rms_back_emf_V,max_abs_raw_voltage_V,rms_raw_voltage_V,max_abs_voltage_V,rms_voltage_V,max_abs_integrator_V,rms_integrator_V,max_abs_measured_rpm,rms_measured_rpm,max_abs_voltage_avg_V,rms_voltage_avg_V,max_abs_voltage_command_sat_V,rms_voltage_command_sat_V,max_abs_duty_cycle,rms_duty_cycle,max_abs_reference_rpm,rms_reference_rpm,target_rpm
+1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,500
+1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1000
+1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1500
+1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,2000

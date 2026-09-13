@@ -1,0 +1,93 @@
+function [checks,m] = check_motioncore_phase5(mc,p3,p4,p5,d,s,e,isNominal)
+% Runtime p3 MUST be the per-test struct. No ideal-speed assumptions here.
+if nargin<8,isNominal=true;end
+p5=motioncore_phase5_parameters(p5,p3); tol=p5.check.identity_tol;
+checks=struct('name',{},'status',{},'detail',{});
+v=d{:,:}; w=s{:,:}; z=e{:,:};
+add('Finite populated logs',all(isfinite([v(:);w(:);z(:)])) && height(s)>1 && ...
+    max(abs(s.reference_rpm))>0 && max(abs(s.rpm))>0 && max(abs(d.current_A))>0,'No zero fallbacks');
+ref=motioncore_phase5_reference(mc,p3,p4,p5);
+add('Per-test reference',near(s.reference_rpm,ref.reference_rpm,tol),'Runtime target and step times');
+add('CPR and estimator interval',p5.ENCODER_CPR==p5.decode_multiplier*p5.ENCODER_PPR && ...
+    near(diff(e.time_s),p5.Tenc,tol),'PPR means cycles/revolution/channel');
+counts=e.encoder_count; scaledAngle=e.shaft_angle_rad*p5.ENCODER_CPR/(2*pi);
+% Allow only a one-count choice at a numerically exact boundary, never an
+% arbitrary tick error away from that boundary.
+boundary=abs(scaledAngle-round(scaledAngle))<=1e-7;
+countOK=(counts==floor(scaledAngle)) | (boundary & abs(counts-floor(scaledAngle))<=1);
+add('Angle to integer count',all(counts==fix(counts)) && ...
+    all(d.encoder_count==fix(d.encoder_count)) && all(s.encoder_count==fix(s.encoder_count)) && ...
+    all(countOK) && all(abs(counts)<2^53), ...
+    'Floor angle*CPR/(2*pi); exact integers stored as doubles, no overflow/wrap yet');
+add('Count follows rotation',all(diff(counts)>=0 | diff(e.shaft_angle_rad)<0) && ...
+    all(diff(counts)<=0 | diff(e.shaft_angle_rad)>0),'Forward/reverse consistency');
+add('Digital count difference',e.encoder_delta_count(1)==0 && ...
+    all(s.encoder_delta_count==fix(s.encoder_delta_count)) && ...
+    isequal(e.encoder_delta_count(2:end),diff(counts)),'Count[k]-Count[k-1], startup register preload');
+add('Estimator scaling from counts only',near(s.encoder_rpm,s.encoder_delta_count*p5.rpm_per_count,tol), ...
+    '60/(CPR*Tenc) RPM per count');
+held=interp1(e.time_s,e.encoder_count,s.time_s,'previous','extrap');
+heldRPM=interp1(e.time_s,e.encoder_rpm,s.time_s,'previous','extrap');
+add('Count and estimate held between estimator hits',near(s.encoder_count,held,tol) && ...
+    near(s.encoder_rpm,heldRPM,tol),'Estimator updates at Tenc; controller samples at Ts');
+add('Controller receives encoder RPM',near(s.measured_rpm,s.encoder_rpm,tol) && ...
+    near(s.error_rpm,s.reference_rpm-s.encoder_rpm,tol),'Topology checked separately by runner');
+add('Encoder error log',near(d.encoder_rpm_error,d.encoder_rpm-d.rpm,tol),'Estimate minus instantaneous true speed');
+windowRPM=diff(e.shaft_angle_rad)*60/(2*pi*p5.Tenc);
+windowError=e.encoder_rpm(2:end)-windowRPM;
+add('Count-resolution bound',max(abs(windowError))<=p5.rpm_per_count*(1+1e-6), ...
+    sprintf('Window error %.5g RPM <= %.5g; instantaneous error includes lag',max(abs(windowError)),p5.rpm_per_count));
+add('Torque/back-EMF/RPM identities',near(d.torque_Nm,mc.motor.Kt*d.current_A,tol) && ...
+    near(d.back_emf_V,mc.motor.Ke*d.omega_rad_s,tol) && ...
+    near(d.rpm,mc.units.rad_s_to_rpm*d.omega_rad_s,tol),'Unchanged physical plant');
+add('PWM duty and voltage identity',min(d.duty_cycle)>=-tol && max(d.duty_cycle)<=1+tol && ...
+    near(d.voltage_avg_V,d.duty_cycle*p4.Vdc_V,tol) && ...
+    near(d.duty_cycle,min(max(d.voltage_command_sat_V/p4.Vdc_V,0),1),tol) && ...
+    near(d.voltage_V,d.voltage_command_sat_V,tol) && ...
+    near(d.pwm_error_V,d.voltage_avg_V-d.voltage_command_sat_V,tol) && ...
+    min(d.voltage_avg_V)>=-tol && max(d.voltage_avg_V)<=p4.Vdc_V+tol,'Unquantised averaged actuator');
+raw=p3.Kp*s.error_rpm+s.integrator_V-p3.Kd*s.derivative_rpm_s;
+u=min(max(raw,p3.voltage_min_V),p3.voltage_max_V);
+add('PI algebra and anti-windup tracking',near(s.raw_voltage_V,raw,tol) && ...
+    near(s.voltage_command_sat_V,u,tol) && near(s.aw_error_V,u-raw,tol),'Frozen coefficients');
+nextI=s.integrator_V(1:end-1)+p3.Ts*(p3.Ki*s.error_rpm(1:end-1)+p3.Kb*s.aw_error_V(1:end-1));
+add('Forward Euler integral recurrence',near(s.integrator_V(2:end),nextI,tol) && ...
+    abs(s.integrator_V(1)-p3.integrator_initial_V)<tol,'Register update order unchanged');
+nextD=p3.derivative_a*s.derivative_rpm_s(1:end-1)+p3.derivative_b*diff(s.measured_rpm);
+add('Preserved derivative state',near(s.derivative_rpm_s(2:end),nextD,tol),'Kd remains zero');
+A=[p3.A zeros(2,1);0 1 0]; B=[p3.B;0 0]; E=expm([A B;zeros(2,5)]*p3.Ts);
+x=[s.current_A s.omega_rad_s s.shaft_angle_rad];
+pred=x(1:end-1,:)*E(1:3,1:3).' + [s.voltage_avg_V(1:end-1) s.load_Nm(1:end-1)]*E(1:3,4:5).';
+normErr=max(max(abs(x(2:end,:)-pred)./max(max(abs(x),[],1),ones(1,3))));
+add('Exact ZOH plant and angle integration',normErr<p5.check.transition_tol,sprintf('Normalized residual %.3g',normErr));
+add('Independent count-feedback reference',max(abs(s.rpm-ref.rpm))<=p5.check.reference_rpm_tol, ...
+    sprintf('Max RPM difference %.5g; tick-boundary sensitive',max(abs(s.rpm-ref.rpm))));
+i=d.current_A; omega=d.omega_rad_s; dt=diff(d.time_s);
+Ein=sum(dt.*d.voltage_avg_V(1:end-1).*(i(1:end-1)+i(2:end))/2);
+loss=mc.motor.Ra*i.^2+mc.motor.b*omega.^2+d.load_Nm.*omega;
+stored=0.5*mc.motor.La*i.^2+0.5*mc.motor.J*omega.^2;
+energyErr=abs(Ein-trapz(d.time_s,loss)-(stored(end)-stored(1)))/max([abs(Ein),abs(stored(end)-stored(1)),1e-6]);
+add('Physical energy conservation',energyErr<mc.check.energy_relative_tol,sprintf('Relative residual %.4g',energyErr));
+add('Physical current bound',max(abs(i))<=1.02*p4.Vdc_V/mc.motor.Ra,sprintf('Peak %.4g A; no current limiter',max(abs(i))));
+m=motioncore_phase5_metrics(d,s,e,p3,p5,isNominal);
+if isNominal
+    add('Steady true-speed tracking',abs(m.steady_error_rpm)<=p5.check.mean_speed_error_rpm && ...
+        m.tail_max_error_rpm<=p5.check.max_tail_speed_error_rpm, ...
+        sprintf('Mean %.4g RPM; tail max %.4g RPM',m.steady_error_rpm,m.tail_max_error_rpm));
+    add('Finite-horizon stable response',isfinite(m.rise_time_s) && isfinite(m.settling_time_s) && ...
+        m.settling_time_s<=p5.check.settling_limit_s && m.overshoot_pct<=p5.check.overshoot_pct, ...
+        sprintf('Rise %.4g s; settling %.4g s; overshoot %.3g%%',m.rise_time_s,m.settling_time_s,m.overshoot_pct));
+else
+    add('Saturation and anti-windup recovery',m.saturation_occurred && isfinite(m.settling_time_s) && ...
+        m.settling_time_s<=0.5 && abs(m.steady_error_rpm)<=1 && m.tail_max_error_rpm<=3, ...
+        'Unreachable 3000 RPM followed by 1000 RPM; observed recovery');
+end
+for k=1:numel(checks),fprintf('[%s] %s: %s\n',checks(k).status,checks(k).name,checks(k).detail);end
+    function add(name,pass,detail)
+        status='FAIL'; if pass,status='PASS';end
+        checks(end+1)=struct('name',name,'status',status,'detail',detail);
+    end
+end
+function tf=near(a,b,tol)
+tf=all(abs(a-b)<=tol*max(1,max(abs(b))));
+end
